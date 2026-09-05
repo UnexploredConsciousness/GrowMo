@@ -25,14 +25,17 @@ function App() {
 
       const data = await response.json();
 
-      const agentMessage = {
+            const agentMessage = {
         role: 'agent',
-        text: data.matched
-          ? `${data.reasoning} — ${data.item.name} (₹${data.item.price / 100})`
-          : data.reasoning,
+        text: data.intent === 'list_catalog'
+          ? data.reasoning
+          : data.matched
+            ? `${data.reasoning} — ${data.item.name} (₹${data.item.price / 100})`
+            : data.reasoning,
         matched: data.matched,
         item: data.matched ? data.item : null,
         status: data.matched ? 'awaiting_confirmation' : null,
+        catalogList: data.intent === 'list_catalog' ? data.catalog : null,
       };
 
       setMessages((prev) => [...prev, agentMessage]);
@@ -88,7 +91,7 @@ function App() {
       razorpayCheckout.open();
     } catch (error) {
       console.error('Error creating order:', error);
-      updateMessageStatus(messageIndex, 'failed');
+      updateMessageStatus(messageIndex, 'failed', error.message);
     }
   };
 
@@ -113,9 +116,9 @@ function App() {
     }
   };
 
-  const updateMessageStatus = (messageIndex, newStatus) => {
+  const updateMessageStatus = (messageIndex, newStatus, detail = null) => {
     setMessages((prev) =>
-      prev.map((msg, i) => (i === messageIndex ? { ...msg, status: newStatus } : msg))
+      prev.map((msg, i) => (i === messageIndex ? { ...msg, status: newStatus, statusDetail: detail } : msg))
     );
   };
 
@@ -125,10 +128,10 @@ function App() {
     }
   };
 
-  const renderStatusLabel = (status) => {
+  const renderStatusLabel = (status, detail) => {
     if (status === 'processing') return 'Processing…';
     if (status === 'paid') return '✓ Payment successful';
-    if (status === 'failed') return 'Could not create order';
+    if (status === 'failed') return detail || 'Could not create order';
     if (status === 'verification_failed') return 'Payment could not be verified';
     return null;
   };
@@ -142,6 +145,16 @@ function App() {
           <div key={index} className={`message ${msg.role}`}>
             <div>{msg.text}</div>
 
+                        {msg.catalogList && (
+              <ul className="catalog-list">
+                {msg.catalogList.map((product) => (
+                  <li key={product.id}>
+                    {product.name} — ₹{product.price / 100}
+                  </li>
+                ))}
+              </ul>
+            )}
+
             {msg.status === 'awaiting_confirmation' && (
               <button
                 className="confirm-button"
@@ -152,7 +165,7 @@ function App() {
             )}
 
             {msg.status && msg.status !== 'awaiting_confirmation' && (
-              <div className="status-label">{renderStatusLabel(msg.status)}</div>
+              <div className="status-label">{renderStatusLabel(msg.status, msg.statusDetail)}</div>
             )}
           </div>
         ))}
@@ -175,4 +188,4 @@ function App() {
   );
 }
 
-export default App;
+export default App; 

@@ -5,8 +5,11 @@ const crypto = require('crypto');
 const { GoogleGenAI } = require('@google/genai');
 const { catalog, findCatalogItem } = require('./catalog');
 const cors = require('cors');
+const { logEvent, getLog } = require('./auditlog');
 
 dotenv.config();
+
+const MAX_TRANSACTION_AMOUNT = 200000; // ₹2000 in paise — hard ceiling, no order above this is ever created
 
 const app = express();
 app.use(cors());
@@ -43,6 +46,16 @@ app.post('/api/create-order', async (req, res) => {
       return res.status(404).json({ error: 'Item not found in catalog' });
     }
 
+    if (item.price > MAX_TRANSACTION_AMOUNT) {
+      logEvent({
+        type: 'order_blocked',
+        itemId: item.id,
+        amount: item.price,
+        reason: 'Exceeds maximum allowed transaction amount',
+      });
+      return res.status(403).json({ error: 'This transaction exceeds the allowed spending limit' });
+    }
+
     const options = {
       amount: item.price,
       currency: 'INR',
@@ -50,6 +63,13 @@ app.post('/api/create-order', async (req, res) => {
     };
 
     const order = await razorpay.orders.create(options);
+
+    logEvent({
+      type: 'order_created',
+      itemId: item.id,
+      amount: item.price,
+      orderId: order.id,
+    });
 
     res.json({ order, item });
   } catch (error) {
@@ -75,6 +95,13 @@ app.post('/api/verify-payment', (req, res) => {
 
     const isValid = expectedSignature === razorpay_signature;
 
+    logEvent({
+      type: 'payment_verification',
+      orderId: razorpay_order_id,
+      paymentId: razorpay_payment_id,
+      verified: isValid,
+    });
+
     if (isValid) {
       res.json({ verified: true, message: 'Payment verified successfully' });
     } else {
@@ -98,32 +125,37 @@ app.post('/api/interpret', async (req, res) => {
       .map((p) => `- id: "${p.id}", name: "${p.name}", price: ₹${p.price / 100}`)
       .join('\n');
 
-    const decisionSchema = {
+        const decisionSchema = {
       type: 'object',
       properties: {
+        intent: {
+          type: 'string',
+          enum: ['purchase', 'list_catalog', 'unclear'],
+          description: '"purchase" if the user wants to buy a specific item, "list_catalog" if they want to see available items, "unclear" otherwise.',
+        },
         matched: {
           type: 'boolean',
-          description: 'True if the user request clearly matches exactly one catalog item.',
+          description: 'Only relevant when intent is "purchase". True if the request clearly matches exactly one catalog item.',
         },
         itemId: {
           type: 'string',
-          description: 'The id of the matched catalog item, or empty string if no match.',
+          description: 'Only relevant when intent is "purchase". The id of the matched catalog item, or empty string if no match.',
         },
         reasoning: {
           type: 'string',
-          description: 'A short, human-readable explanation of why this item was chosen (or why nothing matched).',
+          description: 'A short, human-readable explanation of the decision.',
         },
       },
-      required: ['matched', 'itemId', 'reasoning'],
+      required: ['intent', 'matched', 'itemId', 'reasoning'],
     };
 
-    const prompt = `You are a shopping assistant for GrowMo. Here is the exact catalog of items available. You must ONLY match against these — never invent an item that isn't listed.
+        const prompt = `You are a shopping assistant for GrowMo. Here is the exact catalog of items available. You must ONLY match against these — never invent an item that isn't listed.
 
 ${catalogDescription}
 
 User request: "${message}"
 
-Decide which catalog item (if any) this request matches, and explain your reasoning in one or two sentences.`;
+If the user is asking to see, browse, or list available items rather than requesting a specific purchase, set intent to "list_catalog". Otherwise, decide which catalog item (if any) matches their request, and explain your reasoning in one or two sentences.`;
 
     const interaction = await ai.interactions.create({
       model: 'gemini-3.7-flash',
@@ -137,8 +169,32 @@ Decide which catalog item (if any) this request matches, and explain your reason
 
     const decision = JSON.parse(interaction.output_text);
 
+        if (decision.intent === 'list_catalog') {
+      logEvent({
+        type: 'interpretation',
+        message,
+        matched: false,
+        intent: 'list_catalog',
+      });
+
+      return res.json({
+        matched: false,
+        intent: 'list_catalog',
+        catalog,
+        reasoning: decision.reasoning,
+      });
+    }
+
     // Never trust the model's output blindly — re-verify against the real catalog
     const matchedItem = findCatalogItem(decision.itemId);
+
+    logEvent({
+      type: 'interpretation',
+      message,
+      matched: decision.matched && !!matchedItem,
+      itemId: matchedItem ? matchedItem.id : null,
+      reasoning: decision.reasoning,
+    });
 
     if (!decision.matched || !matchedItem) {
       return res.json({
@@ -160,4 +216,8 @@ Decide which catalog item (if any) this request matches, and explain your reason
 
 app.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
+});
+
+app.get('/api/audit-log', (req, res) => {
+  res.json(getLog());
 });

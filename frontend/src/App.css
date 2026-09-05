@@ -166,3 +166,12 @@
   font-size: 0.85em;
   opacity: 0.8;
 }
+
+.catalog-list {
+  margin: 8px 0 0 0;
+  padding-left: 18px;
+}
+
+.catalog-list li {
+  margin-bottom: 4px;
+}
