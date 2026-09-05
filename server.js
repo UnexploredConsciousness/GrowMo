@@ -158,7 +158,7 @@ User request: "${message}"
 If the user is asking to see, browse, or list available items rather than requesting a specific purchase, set intent to "list_catalog". Otherwise, decide which catalog item (if any) matches their request, and explain your reasoning in one or two sentences.`;
 
     const interaction = await ai.interactions.create({
-      model: 'gemini-3.7-flash',
+      model: 'gemini-3.6-flash',
       input: prompt,
       response_format: {
         type: 'text',

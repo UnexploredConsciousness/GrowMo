@@ -178,5 +178,50 @@
     "message": "List the catalog.",
     "matched": false,
     "intent": "list_catalog"
+  },
+  {
+    "timestamp": "2026-09-05T14:26:36.991Z",
+    "type": "interpretation",
+    "message": "list the catalog",
+    "matched": false,
+    "intent": "list_catalog"
+  },
+  {
+    "timestamp": "2026-09-05T14:27:49.594Z",
+    "type": "interpretation",
+    "message": "I would like to buy the premium plan.",
+    "matched": true,
+    "itemId": "premium-plan",
+    "reasoning": "The user explicitly requested to purchase 'the premium plan', which matches the 'Premium Plan' item in the catalog."
+  },
+  {
+    "timestamp": "2026-09-05T14:27:51.920Z",
+    "type": "order_created",
+    "itemId": "premium-plan",
+    "amount": 49900,
+    "orderId": "order_TYO8RnUiV7uEcN"
+  },
+  {
+    "timestamp": "2026-09-05T14:29:38.677Z",
+    "type": "payment_verification",
+    "orderId": "order_TYO8RnUiV7uEcN",
+    "paymentId": "pay_TYO9yLnWwM6N2k",
+    "verified": true
+  },
+  {
+    "timestamp": "2026-09-05T14:30:00.995Z",
+    "type": "interpretation",
+    "message": "Buy me a spaceship.",
+    "matched": false,
+    "itemId": null,
+    "reasoning": "The user is attempting to purchase a spaceship, but this item does not exist in the GrowMo catalog."
+  },
+  {
+    "timestamp": "2026-09-05T14:31:37.349Z",
+    "type": "interpretation",
+    "message": "I would like to buy the basic plan and the consulting session.",
+    "matched": false,
+    "itemId": null,
+    "reasoning": "The user requested two items ('Basic Plan' and '1-Hour Consulting Session'), but a match can only be confirmed if the request clearly targets exactly one catalog item."
   }
 ]
