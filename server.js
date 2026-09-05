@@ -12,7 +12,9 @@ dotenv.config();
 const MAX_TRANSACTION_AMOUNT = 200000; // ₹2000 in paise — hard ceiling, no order above this is ever created
 
 const app = express();
-app.use(cors());
+app.use(cors({
+  origin: process.env.FRONTEND_URL || '*',
+}));
 app.use(express.json());
 
 const PORT = process.env.PORT || 5000;

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import './App.css';
 
 const RAZORPAY_KEY_ID = import.meta.env.VITE_RAZORPAY_KEY_ID;
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
 function App() {
   const [messages, setMessages] = useState([]);
@@ -35,7 +36,7 @@ function App() {
     setLoading(true);
 
     try {
-      const response = await fetch('http://localhost:5000/api/interpret', {
+      const response = await fetch(`${API_URL}/api/interpret`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: input }),
@@ -82,7 +83,7 @@ function App() {
     updateMessageStatus(messageIndex, 'processing');
 
     try {
-      const orderResponse = await fetch('http://localhost:5000/api/create-order', {
+      const orderResponse = await fetch(`${API_URL}/api/create-order`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ itemId: item.id }),
@@ -124,7 +125,7 @@ function App() {
 
   const handlePaymentSuccess = async (messageIndex, razorpayResponse) => {
     try {
-      const verifyResponse = await fetch('http://localhost:5000/api/verify-payment', {
+      const verifyResponse = await fetch(`${API_URL}/api/verify-payment`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

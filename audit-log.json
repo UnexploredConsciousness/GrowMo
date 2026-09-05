@@ -223,5 +223,42 @@
     "matched": false,
     "itemId": null,
     "reasoning": "The user requested two items ('Basic Plan' and '1-Hour Consulting Session'), but a match can only be confirmed if the request clearly targets exactly one catalog item."
+  },
+  {
+    "timestamp": "2026-09-05T14:43:57.522Z",
+    "type": "interpretation",
+    "message": "list the catalog",
+    "matched": false,
+    "intent": "list_catalog"
+  },
+  {
+    "timestamp": "2026-09-05T14:44:15.011Z",
+    "type": "interpretation",
+    "message": "buy premium",
+    "matched": true,
+    "itemId": "premium-plan",
+    "reasoning": "The user explicitly asked to 'buy premium', which unambiguously matches the 'Premium Plan' item in the catalog."
+  },
+  {
+    "timestamp": "2026-09-05T14:44:18.498Z",
+    "type": "order_created",
+    "itemId": "premium-plan",
+    "amount": 49900,
+    "orderId": "order_TYOPopp5gRorxI"
+  },
+  {
+    "timestamp": "2026-09-05T14:45:41.001Z",
+    "type": "payment_verification",
+    "orderId": "order_TYOPopp5gRorxI",
+    "paymentId": "pay_TYOQfk3uBhdgII",
+    "verified": true
+  },
+  {
+    "timestamp": "2026-09-05T14:46:16.540Z",
+    "type": "interpretation",
+    "message": "Can you buy two things at once?",
+    "matched": false,
+    "itemId": null,
+    "reasoning": "The user is asking a general question about purchasing multiple items at once rather than requesting a specific item or asking to view the catalog."
   }
 ]
