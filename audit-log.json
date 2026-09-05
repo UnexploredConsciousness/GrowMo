@@ -260,5 +260,138 @@
     "matched": false,
     "itemId": null,
     "reasoning": "The user is asking a general question about purchasing multiple items at once rather than requesting a specific item or asking to view the catalog."
+  },
+  {
+    "timestamp": "2026-09-05T15:46:36.083Z",
+    "type": "interpretation",
+    "message": "I would like to buy the premium plan",
+    "matched": true,
+    "itemId": "premium-plan",
+    "reasoning": "The user explicitly stated they want to buy the premium plan, which clearly matches the 'Premium Plan' item in the catalog."
+  },
+  {
+    "timestamp": "2026-09-05T15:46:41.032Z",
+    "type": "order_created",
+    "itemId": "premium-plan",
+    "amount": 49900,
+    "orderId": "order_TYPThwjKKsk6Ds"
+  },
+  {
+    "timestamp": "2026-09-05T15:47:38.443Z",
+    "type": "payment_verification",
+    "orderId": "order_TYPThwjKKsk6Ds",
+    "paymentId": "pay_TYPUJoZDflcdU2",
+    "verified": true
+  },
+  {
+    "timestamp": "2026-09-05T16:31:07.469Z",
+    "type": "interpretation",
+    "message": "I want to buy the premium ",
+    "matched": true,
+    "itemId": "premium-plan",
+    "reasoning": "The user explicitly expressed a desire to buy 'the premium', which clearly corresponds to the 'Premium Plan' in the catalog."
+  },
+  {
+    "timestamp": "2026-09-05T16:31:10.787Z",
+    "type": "order_created",
+    "itemId": "premium-plan",
+    "amount": 49900,
+    "orderId": "order_TYQEi67VxFTkox"
+  },
+  {
+    "timestamp": "2026-09-05T16:31:52.295Z",
+    "type": "payment_verification",
+    "orderId": "order_TYQEi67VxFTkox",
+    "paymentId": "pay_TYQF5dVwoSMKOX",
+    "verified": true
+  },
+  {
+    "timestamp": "2026-09-05T16:37:33.467Z",
+    "type": "interpretation",
+    "message": "I want to buy the premium plan",
+    "matched": true,
+    "itemId": "premium-plan",
+    "reasoning": "The user explicitly requested to buy the premium plan, which clearly matches the 'Premium Plan' (id: premium-plan) in the catalog."
+  },
+  {
+    "timestamp": "2026-09-05T16:38:50.266Z",
+    "type": "interpretation",
+    "message": "Display the catalog\\",
+    "matched": false,
+    "intent": "list_catalog"
+  },
+  {
+    "timestamp": "2026-09-05T16:39:06.608Z",
+    "type": "interpretation",
+    "message": "I want to buy the premium plan.",
+    "matched": true,
+    "itemId": "premium-plan",
+    "reasoning": "The user explicitly requested to buy the 'premium plan', which clearly matches the 'Premium Plan' item in the catalog."
+  },
+  {
+    "timestamp": "2026-09-05T16:39:22.359Z",
+    "type": "order_created",
+    "itemId": "premium-plan",
+    "amount": 49900,
+    "orderId": "order_TYQNMjT4nWez87"
+  },
+  {
+    "timestamp": "2026-09-05T16:40:12.347Z",
+    "type": "interpretation",
+    "message": "I want to buy the premium plan",
+    "matched": true,
+    "itemId": "premium-plan",
+    "reasoning": "The user explicitly requested to buy 'the premium plan', which matches the 'premium-plan' item in the catalog."
+  },
+  {
+    "timestamp": "2026-09-05T16:40:15.082Z",
+    "type": "order_created",
+    "itemId": "premium-plan",
+    "amount": 49900,
+    "orderId": "order_TYQOIAlrVzw7Re"
+  },
+  {
+    "timestamp": "2026-09-05T16:41:08.884Z",
+    "type": "interpretation",
+    "message": "List the catalog.",
+    "matched": false,
+    "intent": "list_catalog"
+  },
+  {
+    "timestamp": "2026-09-05T16:41:24.338Z",
+    "type": "interpretation",
+    "message": "I want to buy the premium plan.",
+    "matched": true,
+    "itemId": "premium-plan",
+    "reasoning": "The user explicitly stated they want to buy the premium plan, which exactly matches the 'Premium Plan' item in the catalog."
+  },
+  {
+    "timestamp": "2026-09-05T16:41:37.927Z",
+    "type": "order_created",
+    "itemId": "premium-plan",
+    "amount": 49900,
+    "orderId": "order_TYQPgh5jUiiJjg"
+  },
+  {
+    "timestamp": "2026-09-05T16:42:20.430Z",
+    "type": "payment_verification",
+    "orderId": "order_TYQPgh5jUiiJjg",
+    "paymentId": "pay_TYQQ4vC65Wu3ce",
+    "verified": true
+  },
+  {
+    "timestamp": "2026-09-05T17:26:03.090Z",
+    "type": "interpretation",
+    "message": "I want to buy consulting.",
+    "matched": true,
+    "itemId": "consulting-session",
+    "reasoning": "The user explicitly stated they want to buy consulting, which uniquely matches the '1-Hour Consulting Session' catalog item."
+  },
+  {
+    "timestamp": "2026-09-05T17:27:22.116Z",
+    "type": "order_blocked",
+    "itemId": "consulting-session",
+    "amount": 150000,
+    "reason": "Exceeds maximum allowed transaction amount"
   }
 ]

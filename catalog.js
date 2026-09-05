@@ -14,6 +14,11 @@ const catalog = [
     name: '1-Hour Consulting Session',
     price: 150000, // ₹1500 in paise
   },
+  {
+    id: 'enterprise-package',
+    name: 'Enterprise Package',
+    price: 500000, // ₹5000 in paise — intentionally above the spending cap
+  },
 ];
 
 // Single source of truth for "does this item exist" —
