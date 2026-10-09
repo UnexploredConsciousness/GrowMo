@@ -5,9 +5,24 @@ const RAZORPAY_KEY_ID = import.meta.env.VITE_RAZORPAY_KEY_ID;
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
 function App() {
-  const [messages, setMessages] = useState([]);
+  const [messages, setMessages] = useState(() => {
+    try {
+      const saved = localStorage.getItem('growmo_chat_history');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('growmo_chat_history', JSON.stringify(messages));
+    } catch (e) {
+      console.error('Failed to save chat history to localStorage:', e);
+    }
+  }, [messages]);
 
   useEffect(() => {
     const observer = new IntersectionObserver(
@@ -27,10 +42,17 @@ function App() {
     return () => observer.disconnect();
   }, []);
 
+  const clearChatHistory = () => {
+    setMessages([]);
+    localStorage.removeItem('growmo_chat_history');
+  };
+
   const sendMessage = async () => {
     if (!input.trim()) return;
 
     const userMessage = { role: 'user', text: input };
+    const historyForBackend = [...messages, userMessage];
+
     setMessages((prev) => [...prev, userMessage]);
     setInput('');
     setLoading(true);
@@ -39,7 +61,10 @@ function App() {
       const response = await fetch(`${API_URL}/api/interpret`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: input }),
+        body: JSON.stringify({
+          message: input,
+          conversationHistory: historyForBackend,
+        }),
       });
 
       const data = await response.json();
@@ -53,7 +78,7 @@ function App() {
         return;
       }
 
-            const agentMessage = {
+      const agentMessage = {
         role: 'agent',
         text: data.intent === 'list_catalog'
           ? data.reasoning
@@ -215,7 +240,14 @@ function App() {
       {/* Section 4 — The application itself */}
       <section id="app-section" className="app-section fade-in-section">
         <div className="chat-container">
-          <h1>GrowMo</h1>
+          <div className="chat-header">
+            <h1>GrowMo</h1>
+            {messages.length > 0 && (
+              <button className="clear-chat-button" onClick={clearChatHistory}>
+                Clear History
+              </button>
+            )}
+          </div>
 
           <div className="messages">
             {messages.map((msg, index) => (
