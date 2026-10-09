@@ -18,9 +18,22 @@ async function connectDB() {
   }
 }
 
+// User Schema
+const userSchema = new mongoose.Schema(
+  {
+    username: { type: String, required: true, unique: true, index: true },
+    passwordHash: { type: String, required: true },
+    dailySpendingLimit: { type: Number, default: 200000 }, // ₹2000 in paise
+    disallowNightPurchases: { type: Boolean, default: false }, // Disallow between 00:00 and 06:00
+    categoryRestrictions: [{ type: String }],
+  },
+  { timestamps: true }
+);
+
 // Order Schema
 const orderSchema = new mongoose.Schema(
   {
+    userId: { type: String, default: 'guest', index: true },
     orderId: { type: String, unique: true, sparse: true },
     itemId: { type: String, required: true },
     amount: { type: Number, required: true },
@@ -28,7 +41,7 @@ const orderSchema = new mongoose.Schema(
     paymentId: { type: String, default: null },
     status: {
       type: String,
-      enum: ['CREATED', 'PAID', 'FAILED', 'BLOCKED'],
+      enum: ['CREATED', 'PAID', 'FAILED', 'BLOCKED', 'CANCELLED', 'REFUNDED'],
       default: 'CREATED',
     },
     reason: { type: String, default: null },
@@ -40,6 +53,7 @@ const orderSchema = new mongoose.Schema(
 const auditLogSchema = new mongoose.Schema(
   {
     timestamp: { type: Date, default: Date.now },
+    userId: { type: String, default: 'guest' },
     type: { type: String, required: true },
     message: String,
     itemId: String,
@@ -55,7 +69,8 @@ const auditLogSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+const User = mongoose.models.User || mongoose.model('User', userSchema);
 const Order = mongoose.models.Order || mongoose.model('Order', orderSchema);
 const AuditLog = mongoose.models.AuditLog || mongoose.model('AuditLog', auditLogSchema);
 
-module.exports = { connectDB, isDBConnected, Order, AuditLog };
+module.exports = { connectDB, isDBConnected, User, Order, AuditLog };

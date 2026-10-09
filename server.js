@@ -2,14 +2,19 @@ const express = require('express');
 const dotenv = require('dotenv');
 const Razorpay = require('razorpay');
 const crypto = require('crypto');
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
 const { GoogleGenAI } = require('@google/genai');
 const rateLimit = require('express-rate-limit');
 const { catalog, findCatalogItem } = require('./catalog');
 const cors = require('cors');
 const { logEvent, getLog } = require('./auditlog');
-const { connectDB, isDBConnected, Order } = require('./db');
+const { connectDB, isDBConnected, User, Order } = require('./db');
+const { evaluatePurchasePolicy, GLOBAL_MAX_TRANSACTION_AMOUNT } = require('./policyEngine');
 
 dotenv.config();
+
+const JWT_SECRET = process.env.JWT_SECRET || 'growmo_secret_jwt_key_2026';
 
 // --- Startup Environment Validation ---
 const requiredEnvVars = ['GEMINI_API_KEY', 'RAZORPAY_KEY_ID', 'RAZORPAY_KEY_SECRET'];
@@ -19,9 +24,34 @@ if (missingEnvVars.length > 0) {
   process.exit(1);
 }
 
-const MAX_TRANSACTION_AMOUNT = 200000; // ₹2000 in paise — hard ceiling, no order above this is ever created
-
 const app = express();
+
+// --- Auth Middleware ---
+async function authMiddleware(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.split(' ')[1];
+    try {
+      const decoded = jwt.verify(token, JWT_SECRET);
+      if (isDBConnected()) {
+        const foundUser = await User.findById(decoded.userId).lean();
+        if (foundUser) req.user = foundUser;
+      }
+    } catch {
+      // Invalid token fallback
+    }
+  }
+  if (!req.user) {
+    req.user = {
+      _id: 'guest',
+      username: 'guest',
+      dailySpendingLimit: GLOBAL_MAX_TRANSACTION_AMOUNT,
+      disallowNightPurchases: false,
+      categoryRestrictions: [],
+    };
+  }
+  next();
+}
 
 // --- Rate Limiting Guardrails ---
 const apiLimiter = rateLimit({
@@ -42,7 +72,7 @@ app.use(cors({
   origin: process.env.FRONTEND_URL || '*',
 }));
 
-// --- Razorpay Webhook Endpoint (MUST be before express.json() to parse raw body for HMAC signature verification) ---
+// --- Razorpay Webhook Endpoint (MUST be before express.json()) ---
 app.post('/api/webhooks/razorpay', express.raw({ type: 'application/json' }), async (req, res) => {
   try {
     const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET || process.env.RAZORPAY_KEY_SECRET;
@@ -82,7 +112,6 @@ app.post('/api/webhooks/razorpay', express.raw({ type: 'application/json' }), as
 
       if (orderId) {
         if (isDBConnected()) {
-          // Idempotency check: check if order is already marked as PAID
           const existingOrder = await Order.findOne({ orderId });
           if (existingOrder && existingOrder.status === 'PAID') {
             console.log(`[Razorpay Webhook]: Order ${orderId} is already PAID. Skipping (Idempotent).`);
@@ -126,10 +155,11 @@ app.use(express.json());
 
 app.use('/api/', apiLimiter);
 app.use('/api/interpret', interpretLimiter);
+app.use(authMiddleware);
 
 const PORT = process.env.PORT || 5000;
 
-// --- Service instances, grouped together for easy scanning ---
+// --- Service instances ---
 
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
@@ -138,7 +168,98 @@ const razorpay = new Razorpay({
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-// --- Routes ---
+// --- Auth & Policy Routes ---
+
+app.post('/api/auth/register', async (req, res) => {
+  try {
+    const { username, password, dailySpendingLimit, disallowNightPurchases } = req.body;
+    if (!username || !password) {
+      return res.status(400).json({ error: 'username and password are required' });
+    }
+
+    if (isDBConnected()) {
+      const existing = await User.findOne({ username });
+      if (existing) {
+        return res.status(400).json({ error: 'Username already taken' });
+      }
+
+      const passwordHash = await bcrypt.hash(password, 10);
+      const user = await User.create({
+        username,
+        passwordHash,
+        dailySpendingLimit: dailySpendingLimit || 200000,
+        disallowNightPurchases: !!disallowNightPurchases,
+      });
+
+      const token = jwt.sign({ userId: user._id, username: user.username }, JWT_SECRET, { expiresIn: '7d' });
+      return res.json({ token, user: { id: user._id, username: user.username, dailySpendingLimit: user.dailySpendingLimit, disallowNightPurchases: user.disallowNightPurchases } });
+    }
+
+    res.status(503).json({ error: 'Database disconnected' });
+  } catch (err) {
+    console.error('Register error:', err);
+    res.status(500).json({ error: 'Registration failed' });
+  }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    if (!username || !password) {
+      return res.status(400).json({ error: 'username and password are required' });
+    }
+
+    if (isDBConnected()) {
+      const user = await User.findOne({ username });
+      if (!user) {
+        return res.status(401).json({ error: 'Invalid username or password' });
+      }
+
+      const isValid = await bcrypt.compare(password, user.passwordHash);
+      if (!isValid) {
+        return res.status(401).json({ error: 'Invalid username or password' });
+      }
+
+      const token = jwt.sign({ userId: user._id, username: user.username }, JWT_SECRET, { expiresIn: '7d' });
+      return res.json({ token, user: { id: user._id, username: user.username, dailySpendingLimit: user.dailySpendingLimit, disallowNightPurchases: user.disallowNightPurchases } });
+    }
+
+    res.status(503).json({ error: 'Database disconnected' });
+  } catch (err) {
+    console.error('Login error:', err);
+    res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+app.get('/api/auth/me', (req, res) => {
+  res.json({ user: req.user });
+});
+
+app.put('/api/auth/policy', async (req, res) => {
+  try {
+    const { dailySpendingLimit, disallowNightPurchases, categoryRestrictions } = req.body;
+    if (req.user._id === 'guest' || !isDBConnected()) {
+      return res.status(401).json({ error: 'Authenticated account required to modify policies' });
+    }
+
+    const updatedUser = await User.findByIdAndUpdate(
+      req.user._id,
+      {
+        ...(dailySpendingLimit !== undefined && { dailySpendingLimit }),
+        ...(disallowNightPurchases !== undefined && { disallowNightPurchases }),
+        ...(categoryRestrictions !== undefined && { categoryRestrictions }),
+      },
+      { new: true }
+    ).lean();
+
+    res.json({ user: updatedUser });
+  } catch (err) {
+    console.error('Update policy error:', err);
+    res.status(500).json({ error: 'Failed to update policy' });
+  }
+});
+
+// --- Core Order & Payment Routes ---
 
 app.get('/', (req, res) => {
   res.send('Server is running');
@@ -158,15 +279,18 @@ app.post('/api/create-order', async (req, res) => {
       return res.status(404).json({ error: 'Item not found in catalog' });
     }
 
-    if (item.price > MAX_TRANSACTION_AMOUNT) {
-      // Record blocked order attempt in DB & Audit Log
+    // Evaluate Delegated Spending Policy Engine
+    const policyResult = await evaluatePurchasePolicy(item, req.user);
+
+    if (!policyResult.allowed) {
       if (isDBConnected()) {
         try {
           await Order.create({
+            userId: req.user._id?.toString() || 'guest',
             itemId: item.id,
             amount: item.price,
             status: 'BLOCKED',
-            reason: 'Exceeds maximum allowed transaction amount',
+            reason: policyResult.reason,
           });
         } catch (dbErr) {
           console.error('[DB Error creating blocked order]:', dbErr.message);
@@ -175,11 +299,12 @@ app.post('/api/create-order', async (req, res) => {
 
       logEvent({
         type: 'order_blocked',
+        userId: req.user._id?.toString() || 'guest',
         itemId: item.id,
         amount: item.price,
-        reason: 'Exceeds maximum allowed transaction amount',
+        reason: policyResult.reason,
       });
-      return res.status(403).json({ error: 'This transaction exceeds the allowed spending limit' });
+      return res.status(403).json({ error: policyResult.reason, policyType: policyResult.policyType });
     }
 
     const options = {
@@ -194,6 +319,7 @@ app.post('/api/create-order', async (req, res) => {
     if (isDBConnected()) {
       try {
         await Order.create({
+          userId: req.user._id?.toString() || 'guest',
           orderId: order.id,
           itemId: item.id,
           amount: item.price,
@@ -207,6 +333,7 @@ app.post('/api/create-order', async (req, res) => {
 
     logEvent({
       type: 'order_created',
+      userId: req.user._id?.toString() || 'guest',
       itemId: item.id,
       amount: item.price,
       orderId: order.id,
@@ -302,8 +429,8 @@ app.post('/api/interpret', async (req, res) => {
       properties: {
         intent: {
           type: 'string',
-          enum: ['purchase', 'list_catalog', 'unclear'],
-          description: '"purchase" if the user wants to buy a specific item, "list_catalog" if they want to see available items, "unclear" otherwise.',
+          enum: ['purchase', 'list_catalog', 'order_status', 'refund_cancel', 'policy_inquiry', 'unclear'],
+          description: '"purchase" to buy an item, "list_catalog" to see catalog, "order_status" to check past orders/purchases, "refund_cancel" to request refund/cancel order, "policy_inquiry" to ask about spending rules/limits, "unclear" otherwise.',
         },
         matched: {
           type: 'boolean',
@@ -321,14 +448,20 @@ app.post('/api/interpret', async (req, res) => {
       required: ['intent', 'matched', 'itemId', 'reasoning'],
     };
 
-    const prompt = `You are a shopping assistant for GrowMo. Here is the exact catalog of items available. You must ONLY match against these — never invent an item that isn't listed.
+    const prompt = `You are an agentic shopping and account assistant for GrowMo. Here is the exact catalog of items available:
 
 ${catalogDescription}
 
 ${safeHistory ? `Recent Conversation Context:\n${safeHistory}\n` : ''}
 Latest user request: "${message}"
 
-If the user is asking to see, browse, or list available items rather than requesting a specific purchase, set intent to "list_catalog". Otherwise, decide which catalog item (if any) matches their request considering previous context, and explain your reasoning in one or two sentences.`;
+Classify the user intent:
+- "list_catalog": If asking to view or browse products.
+- "order_status": If asking about past orders, purchases, or transaction history.
+- "refund_cancel": If requesting a refund, cancellation, or return.
+- "policy_inquiry": If asking about spending limits, budget rules, or constraints.
+- "purchase": If asking to buy a specific item.
+- "unclear": If none of the above.`;
 
     const interaction = await ai.interactions.create({
       model: 'gemini-3.8-flash',
@@ -342,20 +475,53 @@ If the user is asking to see, browse, or list available items rather than reques
 
     const decision = JSON.parse(interaction.output_text);
 
-        if (decision.intent === 'list_catalog') {
-      logEvent({
-        type: 'interpretation',
-        message,
-        matched: false,
-        intent: 'list_catalog',
-      });
+    if (decision.intent === 'list_catalog') {
+      logEvent({ type: 'interpretation', message, matched: false, intent: 'list_catalog' });
+      return res.json({ matched: false, intent: 'list_catalog', catalog, reasoning: decision.reasoning });
+    }
 
-      return res.json({
-        matched: false,
-        intent: 'list_catalog',
-        catalog,
-        reasoning: decision.reasoning,
-      });
+    if (decision.intent === 'policy_inquiry') {
+      const userLimit = req.user.dailySpendingLimit ? `₹${req.user.dailySpendingLimit / 100}` : '₹2,000';
+      const nightRule = req.user.disallowNightPurchases ? 'Night purchases (00:00 - 06:00) are restricted.' : 'Night purchases are allowed.';
+      const policyMsg = `Your active spending policy: Daily limit is ${userLimit}. ${nightRule} Hard single-item ceiling is ₹2,000.`;
+
+      logEvent({ type: 'interpretation', message, matched: false, intent: 'policy_inquiry' });
+      return res.json({ matched: false, intent: 'policy_inquiry', reasoning: `${decision.reasoning} ${policyMsg}` });
+    }
+
+    if (decision.intent === 'order_status') {
+      let ordersSummary = 'No recent orders found.';
+      if (isDBConnected()) {
+        const userOrders = await Order.find({ userId: req.user._id?.toString() || 'guest' })
+          .sort({ createdAt: -1 })
+          .limit(5)
+          .lean();
+
+        if (userOrders.length > 0) {
+          ordersSummary = 'Your recent orders:\n' + userOrders.map((o) => `- Item: ${o.itemId} | Amount: ₹${o.amount / 100} | Status: ${o.status} | Date: ${new Date(o.createdAt).toLocaleDateString()}`).join('\n');
+        }
+      }
+      logEvent({ type: 'interpretation', message, matched: false, intent: 'order_status' });
+      return res.json({ matched: false, intent: 'order_status', reasoning: `${decision.reasoning}\n\n${ordersSummary}` });
+    }
+
+    if (decision.intent === 'refund_cancel') {
+      let refundMsg = 'No eligible paid order found to refund.';
+      if (isDBConnected()) {
+        const eligibleOrder = await Order.findOne({
+          userId: req.user._id?.toString() || 'guest',
+          status: 'PAID',
+        }).sort({ createdAt: -1 });
+
+        if (eligibleOrder) {
+          eligibleOrder.status = 'REFUNDED';
+          await eligibleOrder.save();
+          refundMsg = `Order ${eligibleOrder.orderId || eligibleOrder._id} for item '${eligibleOrder.itemId}' (₹${eligibleOrder.amount / 100}) has been marked as REFUNDED.`;
+          logEvent({ type: 'order_refunded', orderId: eligibleOrder.orderId, itemId: eligibleOrder.itemId });
+        }
+      }
+      logEvent({ type: 'interpretation', message, matched: false, intent: 'refund_cancel' });
+      return res.json({ matched: false, intent: 'refund_cancel', reasoning: `${decision.reasoning}\n\n${refundMsg}` });
     }
 
     // Never trust the model's output blindly — re-verify against the real catalog
