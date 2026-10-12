@@ -86,6 +86,7 @@ function App() {
   const handleLogout = () => {
     localStorage.removeItem(AUTH_STORAGE_KEY);
     setAuth(null);
+    clearChatHistory();
   };
 
   useEffect(() => {
