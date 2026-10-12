@@ -23,10 +23,6 @@ const userSchema = new mongoose.Schema(
   {
     username: { type: String, required: true, unique: true, index: true },
     passwordHash: { type: String, required: true },
-    email: { type: String, required: true, unique: true, index: true },
-    isVerified: { type: Boolean, default: false },
-    verificationToken: { type: String, default: null },
-    verificationTokenExpiry: { type: Date, default: null },
     dailySpendingLimit: { type: Number, default: 200000 }, // ₹2000 in paise
     disallowNightPurchases: { type: Boolean, default: false }, // Disallow between 00:00 and 06:00
     categoryRestrictions: [{ type: String }],
