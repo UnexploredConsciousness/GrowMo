@@ -1,15 +1,10 @@
 import { useState, useEffect } from 'react';
 import './App.css';
-import Auth from './Auth';
 
 const RAZORPAY_KEY_ID = import.meta.env.VITE_RAZORPAY_KEY_ID;
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
 function App() {
-  // --- Auth state ---
-  const [token, setToken] = useState(() => localStorage.getItem('growmo_token') || null);
-
-  // --- Chat state ---
   const [messages, setMessages] = useState(() => {
     try {
       const saved = localStorage.getItem('growmo_chat_history');
@@ -21,7 +16,6 @@ function App() {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // Persist chat history
   useEffect(() => {
     try {
       localStorage.setItem('growmo_chat_history', JSON.stringify(messages));
@@ -30,7 +24,6 @@ function App() {
     }
   }, [messages]);
 
-  // Fade-in observer
   useEffect(() => {
     const observer = new IntersectionObserver(
       (entries) => {
@@ -49,24 +42,10 @@ function App() {
     return () => observer.disconnect();
   }, []);
 
-  // --- Handlers ---
-
-  const handleLogout = () => {
-    localStorage.removeItem('growmo_token');
-    localStorage.removeItem('growmo_chat_history');
-    setToken(null);
-    setMessages([]);
-  };
-
   const clearChatHistory = () => {
     setMessages([]);
     localStorage.removeItem('growmo_chat_history');
   };
-
-  const authHeaders = () => ({
-    'Content-Type': 'application/json',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  });
 
   const sendMessage = async () => {
     if (!input.trim()) return;
@@ -81,7 +60,7 @@ function App() {
     try {
       const response = await fetch(`${API_URL}/api/interpret`, {
         method: 'POST',
-        headers: authHeaders(),
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: input,
           conversationHistory: historyForBackend,
@@ -101,10 +80,9 @@ function App() {
 
       const agentMessage = {
         role: 'agent',
-        text:
-          data.intent === 'list_catalog'
-            ? data.reasoning
-            : data.matched
+        text: data.intent === 'list_catalog'
+          ? data.reasoning
+          : data.matched
             ? `${data.reasoning} — ${data.item.name} (₹${data.item.price / 100})`
             : data.reasoning,
         matched: data.matched,
@@ -126,12 +104,13 @@ function App() {
   };
 
   const handleConfirmAndPay = async (messageIndex, item) => {
+    // Mark this message as "processing" so the button disables and doesn't get double-clicked
     updateMessageStatus(messageIndex, 'processing');
 
     try {
       const orderResponse = await fetch(`${API_URL}/api/create-order`, {
         method: 'POST',
-        headers: authHeaders(),
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ itemId: item.id }),
       });
 
@@ -173,7 +152,7 @@ function App() {
     try {
       const verifyResponse = await fetch(`${API_URL}/api/verify-payment`, {
         method: 'POST',
-        headers: authHeaders(),
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           razorpay_order_id: razorpayResponse.razorpay_order_id,
           razorpay_payment_id: razorpayResponse.razorpay_payment_id,
@@ -182,6 +161,7 @@ function App() {
       });
 
       const verifyData = await verifyResponse.json();
+
       updateMessageStatus(messageIndex, verifyData.verified ? 'paid' : 'verification_failed');
     } catch (error) {
       console.error('Error verifying payment:', error);
@@ -191,9 +171,7 @@ function App() {
 
   const updateMessageStatus = (messageIndex, newStatus, detail = null) => {
     setMessages((prev) =>
-      prev.map((msg, i) =>
-        i === messageIndex ? { ...msg, status: newStatus, statusDetail: detail } : msg
-      )
+      prev.map((msg, i) => (i === messageIndex ? { ...msg, status: newStatus, statusDetail: detail } : msg))
     );
   };
 
@@ -211,19 +189,6 @@ function App() {
     return null;
   };
 
-  // --- Auth gate ---
-  if (!token) {
-    return (
-      <Auth
-        onAuthSuccess={(newToken) => {
-          localStorage.setItem('growmo_token', newToken);
-          setToken(newToken);
-        }}
-      />
-    );
-  }
-
-  // --- Main UI ---
   return (
     <div className="landing-layout">
       {/* Section 1 — Hero */}
@@ -277,16 +242,11 @@ function App() {
         <div className="chat-container">
           <div className="chat-header">
             <h1>GrowMo</h1>
-            <div className="chat-header-actions">
-              {messages.length > 0 && (
-                <button className="clear-chat-button" onClick={clearChatHistory}>
-                  Clear History
-                </button>
-              )}
-              <button className="logout-button" onClick={handleLogout}>
-                Logout
+            {messages.length > 0 && (
+              <button className="clear-chat-button" onClick={clearChatHistory}>
+                Clear History
               </button>
-            </div>
+            )}
           </div>
 
           <div className="messages">
