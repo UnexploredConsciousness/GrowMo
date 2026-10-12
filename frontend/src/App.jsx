@@ -1,10 +1,27 @@
 import { useState, useEffect } from 'react';
 import './App.css';
+import Auth from './Auth.jsx';
 
 const RAZORPAY_KEY_ID = import.meta.env.VITE_RAZORPAY_KEY_ID;
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
+const AUTH_STORAGE_KEY = 'growmo_auth';
+
+function loadSavedAuth() {
+  try {
+    const saved = localStorage.getItem(AUTH_STORAGE_KEY);
+    const parsed = saved ? JSON.parse(saved) : null;
+    return parsed && parsed.token && parsed.user ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 function App() {
+  // null = guest. Otherwise { token, user }.
+  const [auth, setAuth] = useState(loadSavedAuth);
+  const [showAuth, setShowAuth] = useState(false);
+
   const [messages, setMessages] = useState(() => {
     try {
       const saved = localStorage.getItem('growmo_chat_history');
@@ -23,6 +40,53 @@ function App() {
       console.error('Failed to save chat history to localStorage:', e);
     }
   }, [messages]);
+
+  // If a saved login has expired or is no longer valid, quietly fall back to guest.
+  useEffect(() => {
+    if (!auth) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/auth/me`, {
+          headers: { Authorization: `Bearer ${auth.token}` },
+        });
+        const data = await res.json();
+        if (!cancelled && (!res.ok || !data.user || data.user._id === 'guest')) {
+          localStorage.removeItem(AUTH_STORAGE_KEY);
+          setAuth(null);
+        }
+      } catch {
+        // Server unreachable (e.g. waking up) — keep the saved login for now.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // Only re-check when the token itself changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auth?.token]);
+
+  const authHeaders = () => ({
+    'Content-Type': 'application/json',
+    ...(auth ? { Authorization: `Bearer ${auth.token}` } : {}),
+  });
+
+  const handleAuthSuccess = (newAuth) => {
+    try {
+      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(newAuth));
+    } catch (e) {
+      console.error('Failed to save login:', e);
+    }
+    setAuth(newAuth);
+    setShowAuth(false);
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem(AUTH_STORAGE_KEY);
+    setAuth(null);
+  };
 
   useEffect(() => {
     const observer = new IntersectionObserver(
@@ -60,7 +124,7 @@ function App() {
     try {
       const response = await fetch(`${API_URL}/api/interpret`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(),
         body: JSON.stringify({
           message: input,
           conversationHistory: historyForBackend,
@@ -110,7 +174,7 @@ function App() {
     try {
       const orderResponse = await fetch(`${API_URL}/api/create-order`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(),
         body: JSON.stringify({ itemId: item.id }),
       });
 
@@ -242,11 +306,25 @@ function App() {
         <div className="chat-container">
           <div className="chat-header">
             <h1>GrowMo</h1>
-            {messages.length > 0 && (
-              <button className="clear-chat-button" onClick={clearChatHistory}>
-                Clear History
-              </button>
-            )}
+            <div className="header-actions">
+              <span className="user-badge">
+                {auth ? `Signed in as ${auth.user.username}` : 'Guest'}
+              </span>
+              {auth ? (
+                <button className="clear-chat-button" onClick={handleLogout}>
+                  Log out
+                </button>
+              ) : (
+                <button className="clear-chat-button login-button" onClick={() => setShowAuth(true)}>
+                  Log in / Sign up
+                </button>
+              )}
+              {messages.length > 0 && (
+                <button className="clear-chat-button" onClick={clearChatHistory}>
+                  Clear History
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="messages">
@@ -295,6 +373,14 @@ function App() {
           </div>
         </div>
       </section>
+
+      {showAuth && (
+        <Auth
+          apiUrl={API_URL}
+          onSuccess={handleAuthSuccess}
+          onClose={() => setShowAuth(false)}
+        />
+      )}
     </div>
   );
 }
