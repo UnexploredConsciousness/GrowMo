@@ -4,6 +4,7 @@ const Razorpay = require('razorpay');
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
+const nodemailer = require('nodemailer');
 const { GoogleGenAI } = require('@google/genai');
 const rateLimit = require('express-rate-limit');
 const { catalog, findCatalogItem } = require('./catalog');
@@ -15,6 +16,35 @@ const { evaluatePurchasePolicy, GLOBAL_MAX_TRANSACTION_AMOUNT } = require('./pol
 dotenv.config();
 
 const JWT_SECRET = process.env.JWT_SECRET; // No fallback – must be set via env
+
+// --- Nodemailer Gmail Transporter ---
+const emailTransporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.GMAIL_USER,
+    pass: process.env.GMAIL_APP_PASSWORD, // Gmail App Password (not your regular password)
+  },
+});
+
+async function sendVerificationEmail(toEmail, token) {
+  const baseUrl = process.env.FRONTEND_URL || 'http://localhost:5000';
+  const link = `${baseUrl}/api/auth/verify-email?token=${token}`;
+  await emailTransporter.sendMail({
+    from: `"GrowMo" <${process.env.GMAIL_USER}>`,
+    to: toEmail,
+    subject: 'Verify your GrowMo account',
+    html: `
+      <div style="font-family:sans-serif;max-width:480px;margin:auto">
+        <h2>Welcome to GrowMo 🌱</h2>
+        <p>Click the button below to verify your email address. This link expires in 24 hours.</p>
+        <a href="${link}" style="display:inline-block;padding:12px 24px;background:#14b8a6;color:#fff;border-radius:8px;text-decoration:none;font-weight:600">
+          Verify Email
+        </a>
+        <p style="margin-top:20px;color:#666;font-size:0.85em">Or copy this link: ${link}</p>
+      </div>
+    `,
+  });
+}
 
 // --- Startup Environment Validation ---
 const requiredEnvVars = ['GEMINI_API_KEY', 'RAZORPAY_KEY_ID', 'RAZORPAY_KEY_SECRET'];
@@ -175,33 +205,92 @@ const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 app.post('/api/auth/register', async (req, res) => {
   try {
-    const { username, password, dailySpendingLimit, disallowNightPurchases } = req.body;
-    if (!username || !password) {
-      return res.status(400).json({ error: 'username and password are required' });
+    const { username, password, email, dailySpendingLimit, disallowNightPurchases } = req.body;
+    if (!username || !password || !email) {
+      return res.status(400).json({ error: 'username, email and password are required' });
     }
 
     if (isDBConnected()) {
-      const existing = await User.findOne({ username });
-      if (existing) {
+      const existingUsername = await User.findOne({ username });
+      if (existingUsername) {
         return res.status(400).json({ error: 'Username already taken' });
+      }
+      const existingEmail = await User.findOne({ email });
+      if (existingEmail) {
+        return res.status(400).json({ error: 'Email already registered' });
       }
 
       const passwordHash = await bcrypt.hash(password, 10);
-      const user = await User.create({
+      const verificationToken = crypto.randomBytes(32).toString('hex');
+      const verificationTokenExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+
+      await User.create({
         username,
         passwordHash,
+        email,
+        isVerified: false,
+        verificationToken,
+        verificationTokenExpiry,
         dailySpendingLimit: dailySpendingLimit || 200000,
         disallowNightPurchases: !!disallowNightPurchases,
       });
 
-      const token = jwt.sign({ userId: user._id, username: user.username }, JWT_SECRET, { expiresIn: '7d' });
-      return res.json({ token, user: { id: user._id, username: user.username, dailySpendingLimit: user.dailySpendingLimit, disallowNightPurchases: user.disallowNightPurchases } });
+      // Send verification email (non-blocking – don't fail registration if email fails)
+      try {
+        await sendVerificationEmail(email, verificationToken);
+      } catch (emailErr) {
+        console.error('[Email Error] Failed to send verification email:', emailErr.message);
+      }
+
+      return res.status(201).json({
+        message: 'Account created. Please check your email to verify your account before logging in.',
+        requiresVerification: true,
+      });
     }
 
     res.status(503).json({ error: 'Database disconnected' });
   } catch (err) {
     console.error('Register error:', err);
     res.status(500).json({ error: 'Registration failed' });
+  }
+});
+
+app.get('/api/auth/verify-email', async (req, res) => {
+  try {
+    const { token } = req.query;
+    if (!token) {
+      return res.status(400).send('<p>Missing verification token.</p>');
+    }
+
+    if (!isDBConnected()) {
+      return res.status(503).send('<p>Database unavailable. Please try again shortly.</p>');
+    }
+
+    const user = await User.findOne({
+      verificationToken: token,
+      verificationTokenExpiry: { $gt: new Date() },
+    });
+
+    if (!user) {
+      return res.status(400).send(`
+        <div style="font-family:sans-serif;max-width:480px;margin:auto;padding:40px">
+          <h2>❌ Invalid or expired link</h2>
+          <p>This verification link is invalid or has expired. Please register again.</p>
+        </div>
+      `);
+    }
+
+    user.isVerified = true;
+    user.verificationToken = null;
+    user.verificationTokenExpiry = null;
+    await user.save();
+
+    // Redirect to frontend login page after verification
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    res.redirect(`${frontendUrl}?verified=true`);
+  } catch (err) {
+    console.error('Email verification error:', err);
+    res.status(500).send('<p>Verification failed due to a server error.</p>');
   }
 });
 
@@ -221,6 +310,13 @@ app.post('/api/auth/login', async (req, res) => {
       const isValid = await bcrypt.compare(password, user.passwordHash);
       if (!isValid) {
         return res.status(401).json({ error: 'Invalid username or password' });
+      }
+
+      if (!user.isVerified) {
+        return res.status(403).json({
+          error: 'Email not verified. Please check your inbox and verify your email before logging in.',
+          requiresVerification: true,
+        });
       }
 
       const token = jwt.sign({ userId: user._id, username: user.username }, JWT_SECRET, { expiresIn: '7d' });

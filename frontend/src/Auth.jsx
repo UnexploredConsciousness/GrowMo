@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import './App.css';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
@@ -10,10 +10,24 @@ function Auth({ onAuthSuccess }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
+  // After registration, show "check your email" screen
+  const [pendingVerification, setPendingVerification] = useState(false);
+  // Show "verified" banner if redirected back after clicking email link
+  const [justVerified, setJustVerified] = useState(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('verified') === 'true') {
+      setJustVerified(true);
+      // Clean the URL
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, []);
 
   const toggle = () => {
     setIsRegister((prev) => !prev);
     setError(null);
+    setPendingVerification(false);
   };
 
   const handleSubmit = async (e) => {
@@ -31,9 +45,23 @@ function Auth({ onAuthSuccess }) {
         body: JSON.stringify(body),
       });
       const data = await response.json();
+
       if (!response.ok) {
-        throw new Error(data.error || 'Authentication failed');
+        // Special case: email not yet verified
+        if (data.requiresVerification) {
+          setError('Your email is not verified yet. Please check your inbox.');
+        } else {
+          throw new Error(data.error || 'Authentication failed');
+        }
+        return;
       }
+
+      if (data.requiresVerification) {
+        // Registration succeeded — waiting for email verification
+        setPendingVerification(true);
+        return;
+      }
+
       if (data.token) {
         onAuthSuccess(data.token);
       } else {
@@ -46,10 +74,41 @@ function Auth({ onAuthSuccess }) {
     }
   };
 
+  // "Check your email" screen
+  if (pendingVerification) {
+    return (
+      <div className="auth-page">
+        <div className="auth-container">
+          <h2 className="auth-title">Check your email 📬</h2>
+          <p style={{ textAlign: 'center', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+            We've sent a verification link to <strong>{email}</strong>.
+            Click it to activate your account, then come back and log in.
+          </p>
+          <p style={{ textAlign: 'center', marginTop: 8, fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+            The link expires in 24 hours.
+          </p>
+          <button
+            className="auth-button"
+            style={{ marginTop: 24 }}
+            onClick={() => { setPendingVerification(false); setIsRegister(false); }}
+          >
+            Go to Login
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="auth-page">
       <div className="auth-container">
         <h2 className="auth-title">{isRegister ? 'Create Account' : 'Welcome Back'}</h2>
+
+        {justVerified && (
+          <div className="auth-success">
+            ✅ Email verified! You can now log in.
+          </div>
+        )}
 
         {error && <div className="auth-error">{error}</div>}
 
@@ -85,12 +144,12 @@ function Auth({ onAuthSuccess }) {
         <div className="auth-toggle">
           {isRegister ? (
             <span>
-              Already have an account?
+              Already have an account?{' '}
               <button className="auth-switch" onClick={toggle}>Log in</button>
             </span>
           ) : (
             <span>
-              New here?
+              New here?{' '}
               <button className="auth-switch" onClick={toggle}>Register</button>
             </span>
           )}
