@@ -14,7 +14,7 @@ const { evaluatePurchasePolicy, GLOBAL_MAX_TRANSACTION_AMOUNT } = require('./pol
 
 dotenv.config();
 
-const JWT_SECRET = process.env.JWT_SECRET || 'growmo_secret_jwt_key_2026';
+const JWT_SECRET = process.env.JWT_SECRET; // No fallback – must be set via env
 
 // --- Startup Environment Validation ---
 const requiredEnvVars = ['GEMINI_API_KEY', 'RAZORPAY_KEY_ID', 'RAZORPAY_KEY_SECRET'];
@@ -24,7 +24,7 @@ if (missingEnvVars.length > 0) {
   process.exit(1);
 }
 
-const app = express();
+app.set('trust proxy', 1);
 
 // --- Auth Middleware ---
 async function authMiddleware(req, res, next) {
@@ -35,21 +35,24 @@ async function authMiddleware(req, res, next) {
       const decoded = jwt.verify(token, JWT_SECRET);
       if (isDBConnected()) {
         const foundUser = await User.findById(decoded.userId).lean();
-        if (foundUser) req.user = foundUser;
+        if (foundUser) {
+          req.user = foundUser;
+          return next();
+        }
       }
-    } catch {
-      // Invalid token fallback
+    } catch (e) {
+      // Invalid or expired token – reject request
+      return res.status(401).json({ error: 'Invalid or expired token' });
     }
   }
-  if (!req.user) {
-    req.user = {
-      _id: 'guest',
-      username: 'guest',
-      dailySpendingLimit: GLOBAL_MAX_TRANSACTION_AMOUNT,
-      disallowNightPurchases: false,
-      categoryRestrictions: [],
-    };
-  }
+  // No token – treat as guest (limited functionality)
+  req.user = {
+    _id: 'guest',
+    username: 'guest',
+    dailySpendingLimit: GLOBAL_MAX_TRANSACTION_AMOUNT,
+    disallowNightPurchases: false,
+    categoryRestrictions: [],
+  };
   next();
 }
 

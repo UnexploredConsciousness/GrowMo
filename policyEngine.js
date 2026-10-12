@@ -32,12 +32,14 @@ async function evaluatePurchasePolicy(item, user = {}) {
 
   // 2. Night-Time Purchase Restriction (00:00 - 06:00)
   if (disallowNight) {
-    const currentHour = new Date().getHours();
+    // Compute current hour in India Standard Time (Asia/Kolkata)
+    const istHourString = new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata', hour12: false, hour: 'numeric' });
+    const currentHour = parseInt(istHourString, 10);
     if (currentHour >= 0 && currentHour < 6) {
       return {
         allowed: false,
         policyType: 'night_restriction',
-        reason: 'Policy Violation: Purchases are disallowed during night-time hours (00:00 - 06:00)',
+        reason: 'Policy Violation: Purchases are disallowed during night-time hours (00:00 - 06:00) IST',
       };
     }
   }
