@@ -465,17 +465,16 @@ Classify the user intent:
 - "purchase": If asking to buy a specific item.
 - "unclear": If none of the above.`;
 
-    const interaction = await ai.interactions.create({
-      model: 'gemini-3.8-flash',
-      input: prompt,
-      response_format: {
-        type: 'text',
-        mime_type: 'application/json',
-        schema: decisionSchema,
+    const interaction = await ai.models.generateContent({
+      model: 'gemini-2.0-flash',
+      contents: prompt,
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: decisionSchema,
       },
     });
 
-    const decision = JSON.parse(interaction.output_text);
+    const decision = JSON.parse(interaction.text);
 
     if (decision.intent === 'list_catalog') {
       logEvent({ type: 'interpretation', message, matched: false, intent: 'list_catalog' });
