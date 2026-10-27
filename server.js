@@ -1,3 +1,5 @@
+require('dotenv').config();
+require('node:dns').setServers(['8.8.8.8', '1.1.1.1']);
 const express = require('express');
 const dotenv = require('dotenv');
 const Razorpay = require('razorpay');

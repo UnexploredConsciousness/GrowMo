@@ -1,17 +1,35 @@
 import { useState, useEffect } from 'react';
 
-// Simple username + password login / sign-up dialog.
-// Talks to the existing backend routes: POST /api/auth/login and /api/auth/register.
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+
+// Login / Register dialog with email verification support.
 function Auth({ apiUrl, onSuccess, onClose }) {
+  const resolvedApiUrl = apiUrl || API_URL;
+
   const [mode, setMode] = useState('login'); // 'login' | 'register'
   const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  // After registration, show "check email" screen
+  const [pendingVerification, setPendingVerification] = useState(false);
+  const [pendingEmail, setPendingEmail] = useState('');
+  // Show success banner when redirected back after clicking email link
+  const [justVerified, setJustVerified] = useState(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('verified') === 'true') {
+      setJustVerified(true);
+      setMode('login');
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, []);
 
   useEffect(() => {
     const onKey = (e) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape' && onClose) onClose();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -22,6 +40,7 @@ function Auth({ apiUrl, onSuccess, onClose }) {
   const switchMode = () => {
     setMode(isRegister ? 'login' : 'register');
     setError('');
+    setPendingVerification(false);
   };
 
   const handleSubmit = async (e) => {
@@ -33,6 +52,10 @@ function Auth({ apiUrl, onSuccess, onClose }) {
       setError('Please enter a username and password.');
       return;
     }
+    if (isRegister && !email.trim()) {
+      setError('Please enter your email address.');
+      return;
+    }
     if (isRegister && password.length < 6) {
       setError('Password must be at least 6 characters.');
       return;
@@ -42,20 +65,42 @@ function Auth({ apiUrl, onSuccess, onClose }) {
     setError('');
 
     try {
-      const response = await fetch(`${apiUrl}/api/auth/${isRegister ? 'register' : 'login'}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: cleanName, password }),
-      });
+      const body = isRegister
+        ? { username: cleanName, password, email: email.trim() }
+        : { username: cleanName, password };
+
+      const response = await fetch(
+        `${resolvedApiUrl}/api/auth/${isRegister ? 'register' : 'login'}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        }
+      );
 
       const data = await response.json().catch(() => ({}));
 
-      if (!response.ok || !data.token) {
-        setError(data.error || 'Something went wrong. Please try again.');
+      if (!response.ok) {
+        if (data.requiresVerification) {
+          setError('Your email is not verified yet. Please check your inbox.');
+        } else {
+          setError(data.error || 'Something went wrong. Please try again.');
+        }
         return;
       }
 
-      onSuccess({ token: data.token, user: data.user });
+      // Registration succeeded — waiting for email verification
+      if (data.requiresVerification) {
+        setPendingEmail(email.trim());
+        setPendingVerification(true);
+        return;
+      }
+
+      if (data.token) {
+        onSuccess({ token: data.token, user: data.user });
+      } else {
+        setError('No token returned from server.');
+      }
     } catch {
       setError('Could not reach the server. Please try again in a moment.');
     } finally {
@@ -63,20 +108,69 @@ function Auth({ apiUrl, onSuccess, onClose }) {
     }
   };
 
+  // "Check your email" screen
+  if (pendingVerification) {
+    return (
+      <div className="auth-backdrop">
+        <div className="auth-card" style={{ textAlign: 'center' }}>
+          <h2 className="auth-title">Check your email 📬</h2>
+          <p className="auth-subtitle">
+            We sent a verification link to <strong>{pendingEmail}</strong>.<br />
+            Click it to activate your account, then come back and log in.
+          </p>
+          <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', margin: '0 0 20px' }}>
+            The link expires in 24 hours.
+          </p>
+          <button
+            className="auth-submit"
+            onClick={() => { setPendingVerification(false); setMode('login'); }}
+          >
+            Go to Login
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       className="auth-backdrop"
       onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (e.target === e.currentTarget && onClose) onClose();
       }}
     >
-      <form className="auth-card" onSubmit={handleSubmit} aria-label={isRegister ? 'Create account' : 'Log in'}>
-        <h2 className="auth-title">{isRegister ? 'Create your account' : 'Welcome back'}</h2>
+      <form
+        className="auth-card"
+        onSubmit={handleSubmit}
+        aria-label={isRegister ? 'Create account' : 'Log in'}
+      >
+        <h2 className="auth-title">
+          {isRegister ? 'Create your account' : 'Welcome back'}
+        </h2>
         <p className="auth-subtitle">
           {isRegister
             ? 'Get your own spending policy and order history.'
             : 'Log in to use your own spending policy and order history.'}
         </p>
+
+        {justVerified && (
+          <div className="auth-success">✅ Email verified! You can now log in.</div>
+        )}
+
+        {isRegister && (
+          <>
+            <label className="auth-label" htmlFor="auth-email">Email</label>
+            <input
+              id="auth-email"
+              className="auth-input"
+              type="email"
+              autoComplete="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+            />
+          </>
+        )}
 
         <label className="auth-label" htmlFor="auth-username">Username</label>
         <input
@@ -106,12 +200,14 @@ function Auth({ apiUrl, onSuccess, onClose }) {
         </button>
 
         <button className="auth-switch" type="button" onClick={switchMode}>
-          {isRegister ? 'Already have an account? Log in' : "New here? Create an account"}
+          {isRegister ? 'Already have an account? Log in' : 'New here? Create an account'}
         </button>
 
-        <button className="auth-guest" type="button" onClick={onClose}>
-          Continue as guest
-        </button>
+        {onClose && (
+          <button className="auth-guest" type="button" onClick={onClose}>
+            Continue as guest
+          </button>
+        )}
       </form>
     </div>
   );
